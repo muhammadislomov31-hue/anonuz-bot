@@ -1,239 +1,188 @@
 import asyncio
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import CommandStart, Command
-
 import os
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import CommandStart
 
-TOKEN = os.getenv("TOKEN") or "8567827882:AAF74VcAeGdbKUpwWvOn1ixe4Ej4pEZ8-LE"
-ADMIN_ID = 5315803004
+TOKEN = os.getenv("8567827882:AAF74VcAeGdbKUpwWvOn1ixe4Ej4pEZ8-LE")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-users = {}
-active_chats = {}
-waiting_users = []
+ADMIN_ID = 5315803004
 
-regions = [
-    "Ташкент", "Самарканд", "Бухара", "Фергана",
-    "Андижан", "Наманган", "Сурхандарья",
-    "Кашкадарья", "Хорезм", "Сырдарья",
-    "Джизак", "Навои", "Каракалпакстан"
+users = {}
+waiting_users = []
+active_chats = {}
+
+# ================= КНОПКИ =================
+
+age_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="12–14"), KeyboardButton(text="15–17"), KeyboardButton(text="18+")]],
+    resize_keyboard=True
+)
+
+gender_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="👨 Мужской"), KeyboardButton(text="👩 Женский")]],
+    resize_keyboard=True
+)
+
+regions_list = [
+    "Ташкент", "Самарканд", "Бухара", "Фергана", "Андижан", "Наманган",
+    "Хорезм", "Кашкадарья", "Сурхандарья", "Джизак", "Навои", "Сырдарья"
 ]
 
-genders = ["Мужчина", "Женщина"]
-ages = ["12-15", "16-18", "18+"]
+def region_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=r)] for r in regions_list],
+        resize_keyboard=True
+    )
 
+start_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="🚀 Начать поиск")]],
+    resize_keyboard=True
+)
 
-# ================= START / RESTART =================
+chat_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="▶️ Next"), KeyboardButton(text="⛔ Stop")],
+        [KeyboardButton(text="🚨 Report")]
+    ],
+    resize_keyboard=True
+)
+
+# ================= START =================
 @dp.message(CommandStart())
 async def start_handler(message: types.Message):
-    user_id = message.from_user.id
+    await message.answer("Выберите ваш возраст:", reply_markup=age_kb)
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=r, callback_data=f"region:{r}")]
-            for r in regions
-        ]
-    )
+# ================= REGISTRATION =================
+@dp.message(lambda m: m.text in ["12–14", "15–17", "18+"])
+async def age_handler(message: types.Message):
+    users[message.from_user.id] = {"age": message.text}
+    await message.answer("Выберите ваш пол:", reply_markup=gender_kb)
 
-    users.pop(user_id, None)
-    active_chats.pop(user_id, None)
+@dp.message(lambda m: m.text in ["👨 Мужской", "👩 Женский"])
+async def gender_handler(message: types.Message):
+    users[message.from_user.id]["gender"] = "male" if "Мужской" in message.text else "female"
+    await message.answer("Выберите ваш регион:", reply_markup=region_kb())
 
-    await message.answer("Выберите ваш регион:", reply_markup=keyboard)
+@dp.message(lambda m: m.text in regions_list)
+async def region_handler(message: types.Message):
+    users[message.from_user.id]["region"] = message.text
+    await message.answer("✅ Регистрация завершена!\n\nНажмите «Начать поиск»", reply_markup=start_kb)
 
-
-# ================= REGION =================
-@dp.callback_query(lambda c: c.data.startswith("region:"))
-async def region_handler(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    region = callback.data.split(":")[1]
-
-    users[user_id] = {"region": region}
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=g, callback_data=f"gender:{g}")]
-            for g in genders
-        ]
-    )
-
-    await callback.message.edit_text("Выберите ваш пол:", reply_markup=keyboard)
-
-
-# ================= GENDER =================
-@dp.callback_query(lambda c: c.data.startswith("gender:"))
-async def gender_handler(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    gender = callback.data.split(":")[1]
-
-    users[user_id]["gender"] = gender
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=a, callback_data=f"age:{a}")]
-            for a in ages
-        ]
-    )
-
-    await callback.message.edit_text("Выберите ваш возраст:", reply_markup=keyboard)
-
-
-# ================= AGE =================
-@dp.callback_query(lambda c: c.data.startswith("age:"))
-async def age_handler(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    age = callback.data.split(":")[1]
-
-    users[user_id]["age"] = age
-
-    await callback.message.edit_text(
-        "Регистрация завершена ✅\n\n"
-        "Используйте:\n"
-        "/next — новый диалог\n"
-        "/stop — остановить\n"
-        "/start — изменить данные"
-    )
-
-
-# ================= NEXT =================
-@dp.message(Command("next"))
-async def next_handler(message: types.Message):
-    user_id = message.from_user.id
-
+# ================= HELPER =================
+def ensure_user(user_id):
+    # 🔥 auto-fix if Railway restarted
     if user_id not in users:
-        await message.answer("Сначала используйте /start")
-        return
+        users[user_id] = {
+            "age": "18+",
+            "gender": "male",
+            "region": "Ташкент"
+        }
 
-    # если уже в чате → завершить и искать нового
-    if user_id in active_chats:
-        await stop_chat(user_id, notify_partner=True)
+def is_compatible(u1, u2):
+    return u1["gender"] != u2["gender"]
 
-    # поиск
-    for partner_id in waiting_users:
-        if partner_id == user_id:
-            continue
+# ================= SEARCH =================
+@dp.message(lambda m: m.text == "🚀 Начать поиск")
+async def search_handler(message: types.Message):
+    user_id = message.from_user.id
+    ensure_user(user_id)
 
-        if (
-            users[partner_id]["region"] == users[user_id]["region"]
-            and users[partner_id]["gender"] != users[user_id]["gender"]
-            and users[partner_id]["age"] == users[user_id]["age"]
-        ):
-            waiting_users.remove(partner_id)
+    if user_id in waiting_users:
+        waiting_users.remove(user_id)
 
-            active_chats[user_id] = partner_id
-            active_chats[partner_id] = user_id
+    for partner in waiting_users:
+        if is_compatible(users[user_id], users[partner]):
+            waiting_users.remove(partner)
+            active_chats[user_id] = partner
+            active_chats[partner] = user_id
 
-            keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="Next", callback_data="next_btn"),
-                        InlineKeyboardButton(text="Stop", callback_data="stop_btn")
-                    ]
-                ]
-            )
-
-            text = "Собеседник найден, приятного общения!"
-            await bot.send_message(user_id, text, reply_markup=keyboard)
-            await bot.send_message(partner_id, text, reply_markup=keyboard)
+            await bot.send_message(user_id, "💬 Собеседник найден!", reply_markup=chat_kb)
+            await bot.send_message(partner, "💬 Собеседник найден!", reply_markup=chat_kb)
             return
 
-    if user_id not in waiting_users:
-        waiting_users.append(user_id)
+    waiting_users.append(user_id)
+    await message.answer("⏳ Поиск собеседника...", reply_markup=chat_kb)
 
-    await message.answer("Ожидаем собеседника...")
+# ================= NEXT =================
+@dp.message(lambda m: m.text == "▶️ Next")
+async def next_handler(message: types.Message):
+    user_id = message.from_user.id
+    ensure_user(user_id)
 
+    if user_id in active_chats:
+        partner = active_chats[user_id]
+        active_chats.pop(user_id, None)
+        active_chats.pop(partner, None)
+
+        await bot.send_message(partner, "🔄 Собеседник переключился.", reply_markup=chat_kb)
+
+    if user_id in waiting_users:
+        waiting_users.remove(user_id)
+
+    for partner in waiting_users:
+        if is_compatible(users[user_id], users[partner]):
+            waiting_users.remove(partner)
+            active_chats[user_id] = partner
+            active_chats[partner] = user_id
+
+            await bot.send_message(user_id, "💬 Новый собеседник найден!", reply_markup=chat_kb)
+            await bot.send_message(partner, "💬 Новый собеседник найден!", reply_markup=chat_kb)
+            return
+
+    waiting_users.append(user_id)
+    await message.answer("⏳ Ищем нового собеседника...", reply_markup=chat_kb)
 
 # ================= STOP =================
-@dp.message(Command("stop"))
-async def stop_command(message: types.Message):
+@dp.message(lambda m: m.text == "⛔ Stop")
+async def stop_handler(message: types.Message):
     user_id = message.from_user.id
 
-    if user_id not in active_chats:
-        await message.answer("Вы не в диалоге.")
+    if user_id in active_chats:
+        partner = active_chats[user_id]
+        active_chats.pop(user_id, None)
+        active_chats.pop(partner, None)
+        await bot.send_message(partner, "❌ Диалог завершён.", reply_markup=start_kb)
+
+    if user_id in waiting_users:
+        waiting_users.remove(user_id)
+
+    await message.answer("❌ Вы завершили диалог.\n\nНажмите «Начать поиск»", reply_markup=start_kb)
+
+# ================= REPORT =================
+@dp.message(lambda m: m.text == "🚨 Report")
+async def report_handler(message: types.Message):
+    user_id = message.from_user.id
+    partner = active_chats.get(user_id)
+
+    if not partner:
+        await message.answer("❌ Нет активного диалога.")
         return
 
-    await stop_chat(user_id, notify_partner=True)
-
-    # После стоп даём кнопки Next | Report
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Next", callback_data="next_btn"),
-                InlineKeyboardButton(text="Report", callback_data="report_btn")
-            ]
-        ]
-    )
-    await message.answer(
-        "Диалог остановлен. Теперь вы можете начать новый диалог или отправить жалобу.",
-        reply_markup=keyboard
-    )
-
-
-async def stop_chat(user_id, notify_partner=True):
-    partner_id = active_chats.get(user_id)
-    if not partner_id:
-        return
-
-    if notify_partner:
-        keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Next", callback_data="next_btn"),
-                    InlineKeyboardButton(text="Report", callback_data="report_btn")
-                ]
-            ]
-        )
-        await bot.send_message(
-            partner_id,
-            "Собеседник завершил диалог.",
-            reply_markup=keyboard
-        )
+    await bot.send_message(ADMIN_ID, f"🚨 Жалоба!\nОт: {user_id}\nНа: {partner}")
+    await message.answer("✅ Жалоба отправлена.")
 
     active_chats.pop(user_id, None)
-    active_chats.pop(partner_id, None)
+    active_chats.pop(partner, None)
 
-
-# ================= BUTTONS =================
-@dp.callback_query(lambda c: c.data in ["next_btn", "stop_btn", "report_btn"])
-async def buttons_handler(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-
-    if callback.data == "report_btn":
-        await bot.send_message(
-            ADMIN_ID,
-            f"🚨 Жалоба\nОт: {user_id}"
-        )
-        await callback.message.answer("Жалоба отправлена администратору.")
-        return
-
-    if callback.data == "stop_btn":
-        await stop_command(callback.message)
-
-    if callback.data == "next_btn":
-        await next_handler(callback.message)
-
+    await bot.send_message(partner, "⚠️ На вас пожаловались. Диалог завершён.", reply_markup=start_kb)
+    await message.answer("❌ Диалог завершён.", reply_markup=start_kb)
 
 # ================= RELAY =================
 @dp.message()
 async def relay_handler(message: types.Message):
     user_id = message.from_user.id
-    partner_id = active_chats.get(user_id)
+    partner = active_chats.get(user_id)
 
-    if not partner_id:
-        return
-
-    await bot.copy_message(
-        chat_id=partner_id,
-        from_chat_id=user_id,
-        message_id=message.message_id
-    )
-
+    if partner:
+        await bot.copy_message(chat_id=partner, from_chat_id=user_id, message_id=message.message_id)
 
 # ================= RUN =================
 async def main():
-    print("Бот запущен...")
+    print("🔥 Bot running...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
